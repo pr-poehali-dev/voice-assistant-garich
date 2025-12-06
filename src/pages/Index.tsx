@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,11 +11,93 @@ const Index = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [volume, setVolume] = useState([50]);
   const [brightness, setBrightness] = useState([70]);
+  const [transcript, setTranscript] = useState('');
   const [commandHistory, setCommandHistory] = useState([
     { id: 1, text: 'Открыть браузер', time: '14:32', status: 'success' },
     { id: 2, text: 'Найти документы', time: '14:28', status: 'success' },
     { id: 3, text: 'Закрыть приложение', time: '14:15', status: 'success' },
   ]);
+  
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'ru-RU';
+
+      recognitionRef.current.onresult = (event: any) => {
+        const current = event.resultIndex;
+        const transcriptText = event.results[current][0].transcript;
+        setTranscript(transcriptText);
+
+        if (event.results[current].isFinal) {
+          const command = transcriptText.toLowerCase();
+          handleVoiceCommand(command);
+        }
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        if (event.error === 'not-allowed') {
+          toast({
+            title: "Доступ к микрофону запрещен",
+            description: "Разрешите доступ к микрофону в настройках браузера",
+            variant: "destructive",
+          });
+        }
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        if (isListening) {
+          recognitionRef.current.start();
+        }
+      };
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, [isListening]);
+
+  const handleVoiceCommand = (command: string) => {
+    const newCommand = {
+      id: commandHistory.length + 1,
+      text: command,
+      time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+      status: 'success' as const,
+    };
+    setCommandHistory([newCommand, ...commandHistory]);
+    
+    if (command.includes('открыть') || command.includes('запустить')) {
+      toast({
+        title: "Команда распознана",
+        description: `Открываю: ${command}`,
+      });
+    } else if (command.includes('найти') || command.includes('поиск')) {
+      toast({
+        title: "Команда распознана",
+        description: `Ищу: ${command}`,
+      });
+    } else if (command.includes('закрыть') || command.includes('выключить')) {
+      toast({
+        title: "Команда распознана",
+        description: `Закрываю: ${command}`,
+      });
+    } else {
+      toast({
+        title: "Команда получена",
+        description: command,
+      });
+    }
+    
+    setTranscript('');
+  };
 
   const searchResults = [
     { name: 'Отчет_2024.docx', path: 'C:/Документы/', type: 'document', size: '2.4 MB' },
@@ -23,13 +105,38 @@ const Index = () => {
     { name: 'Бюджет.xlsx', path: 'C:/Документы/', type: 'spreadsheet', size: '1.2 MB' },
   ];
 
-  const handleVoiceToggle = () => {
-    setIsListening(!isListening);
+  const handleVoiceToggle = async () => {
     if (!isListening) {
-      toast({
-        title: "Слушаю...",
-        description: "Говорите команду",
-      });
+      if (!recognitionRef.current) {
+        toast({
+          title: "Ошибка",
+          description: "Ваш браузер не поддерживает распознавание речи",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        recognitionRef.current.start();
+        setIsListening(true);
+        toast({
+          title: "Слушаю...",
+          description: "Говорите команду",
+        });
+      } catch (error) {
+        toast({
+          title: "Ошибка доступа к микрофону",
+          description: "Разрешите доступ к микрофону в настройках браузера",
+          variant: "destructive",
+        });
+      }
+    } else {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      setTranscript('');
     }
   };
 
@@ -108,8 +215,13 @@ const Index = () => {
                   <h2 className="text-2xl font-semibold text-foreground">
                     {isListening ? 'Слушаю вас...' : 'Нажмите, чтобы говорить'}
                   </h2>
+                  {transcript && (
+                    <p className="text-primary mt-2 font-medium">
+                      "{transcript}"
+                    </p>
+                  )}
                   <p className="text-muted-foreground mt-2">
-                    Скажите команду для управления компьютером
+                    {isListening ? 'Говорите команду прямо сейчас' : 'Скажите команду для управления компьютером'}
                   </p>
                 </div>
               </div>
